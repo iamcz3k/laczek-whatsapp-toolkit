@@ -24,7 +24,7 @@ jobs:
       - name: Install Android SDK
         uses: android-actions/setup-android@v3
         with:
-          tools: platform-tools
+          packages: ''
 
       - name: Install Gradle
         run: |
