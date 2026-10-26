@@ -2,6 +2,7 @@ package com.laczek.whatsapptoolkit;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -31,6 +32,8 @@ import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 public class MainActivity extends Activity {
     private static final int REQ_MIC = 41;
@@ -95,6 +98,7 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(0xFF08090B);
         getWindow().setNavigationBarColor(0xFF08090B);
         buildUi();
+        if (getPreferences(MODE_PRIVATE).contains("vault_pin_hash")) showUnlockDialog();
     }
 
     private void buildUi() {
@@ -256,6 +260,16 @@ public class MainActivity extends Activity {
         audioDna.setPadding(dp(14), dp(12), dp(14), dp(12));
         audioDna.setBackgroundColor(0xFF15171B);
         root.addView(audioDna);
+
+        cardTitle(root, "LOCAL AUDIO VAULT");
+        TextView vaultHelp = new TextView(this);
+        vaultHelp.setText("Optional app lock. Your PIN hash stays in private app storage. This is a basic privacy barrier, not encryption of audio files.");
+        vaultHelp.setTextColor(0xFFB7BBC4);
+        vaultHelp.setTextSize(13);
+        vaultHelp.setPadding(0, 0, 0, dp(8));
+        root.addView(vaultHelp);
+        addButton(root, "🔒  Set / change vault PIN", v -> promptSetPin());
+        addButton(root, "Unlock protection off", v -> disableVaultLock());
 
         cardTitle(root, "04  •  CALL AUDIO DIAGNOSTICS");
         TextView warning = new TextView(this);
@@ -704,6 +718,86 @@ public class MainActivity extends Activity {
         if (bytes < 1024) return bytes + " B";
         if (bytes < 1024L * 1024) return String.format(Locale.getDefault(), "%.1f KB", bytes / 1024f);
         return String.format(Locale.getDefault(), "%.1f MB", bytes / (1024f * 1024f));
+    }
+
+    private void promptSetPin() {
+        EditText pin = new EditText(this);
+        pin.setSingleLine(true);
+        pin.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        pin.setHint("Choose a 4-12 digit PIN");
+        new AlertDialog.Builder(this)
+                .setTitle("Protect Audio Vault")
+                .setMessage("This PIN locks the app UI. It does not encrypt audio files. Keep it somewhere safe; there is no recovery flow.")
+                .setView(pin)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save PIN", (dialog, which) -> {
+                    String value = pin.getText().toString();
+                    if (value.length() < 4 || value.length() > 12 || !value.matches("[0-9]+")) {
+                        say("PIN must contain 4-12 digits.");
+                        return;
+                    }
+                    getPreferences(MODE_PRIVATE).edit().putString("vault_pin_hash", hashPin(value)).apply();
+                    say("App lock enabled.");
+                })
+                .show();
+    }
+
+    private void disableVaultLock() {
+        if (!getPreferences(MODE_PRIVATE).contains("vault_pin_hash")) {
+            say("App lock is already disabled.");
+            return;
+        }
+        EditText pin = new EditText(this);
+        pin.setSingleLine(true);
+        pin.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        pin.setHint("Enter current PIN");
+        new AlertDialog.Builder(this)
+                .setTitle("Disable app lock")
+                .setView(pin)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Disable", (dialog, which) -> {
+                    String saved = getPreferences(MODE_PRIVATE).getString("vault_pin_hash", "");
+                    if (saved.equals(hashPin(pin.getText().toString()))) {
+                        getPreferences(MODE_PRIVATE).edit().remove("vault_pin_hash").apply();
+                        say("App lock disabled.");
+                    } else say("Incorrect PIN.");
+                })
+                .show();
+    }
+
+    private void showUnlockDialog() {
+        EditText pin = new EditText(this);
+        pin.setSingleLine(true);
+        pin.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        pin.setHint("Enter Audio Vault PIN");
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("LaCzek Audio Vault")
+                .setMessage("Enter your PIN to open the app.")
+                .setView(pin)
+                .setCancelable(false)
+                .setPositiveButton("Unlock", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String saved = getPreferences(MODE_PRIVATE).getString("vault_pin_hash", "");
+            if (saved.equals(hashPin(pin.getText().toString()))) {
+                dialog.dismiss();
+            } else {
+                pin.setError("Incorrect PIN");
+                pin.setText("");
+            }
+        }));
+        dialog.show();
+    }
+
+    private String hashPin(String pin) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(pin.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder out = new StringBuilder();
+            for (byte b : digest) out.append(String.format(Locale.ROOT, "%02x", b & 0xff));
+            return out.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
     }
 
     private void runCompatibilityCheck() {
