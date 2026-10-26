@@ -50,6 +50,11 @@ public class MainActivity extends Activity {
     private TextView audioDna;
     private TextView deviceDiagnostics;
     private boolean sawMicSignal;
+    private int recordingBitrate = 128000;
+    private int recordingSampleRate = 44100;
+    private int maxRecordingSeconds = 0;
+    private TextView recordingProfile;
+    private TextView recordingLimit;
     private LinearLayout libraryList;
     private boolean userSeeking;
     private EditText trimStart;
@@ -66,6 +71,11 @@ public class MainActivity extends Activity {
                 try { amplitude = recorder.getMaxAmplitude(); } catch (Exception ignored) {}
                 if (liveWaveform != null) liveWaveform.addLevel(amplitude);
                 if (amplitude > 700) sawMicSignal = true;
+                if (maxRecordingSeconds > 0 && seconds >= maxRecordingSeconds) {
+                    stopRecording();
+                    status.setText("Recording automatically stopped at the selected " + maxRecordingSeconds + " second limit.");
+                    return;
+                }
                 if (levelStatus != null) {
                     if (amplitude > 700) {
                         levelStatus.setText("MIC INPUT DETECTED  •  Peak " + amplitude);
@@ -129,6 +139,20 @@ public class MainActivity extends Activity {
         levelStatus.setPadding(dp(2), dp(4), dp(2), dp(10));
         root.addView(levelStatus);
 
+        recordingProfile = new TextView(this);
+        recordingProfile.setText("Recording quality: Standard • AAC 128 kbps / 44.1 kHz");
+        recordingProfile.setTextColor(0xFFD7D9DE);
+        recordingProfile.setTextSize(13);
+        recordingProfile.setPadding(0, dp(6), 0, dp(4));
+        root.addView(recordingProfile);
+        addButton(root, "🎚  Cycle recording quality", v -> cycleRecordingQuality());
+        recordingLimit = new TextView(this);
+        recordingLimit.setText("Recording limit: Unlimited");
+        recordingLimit.setTextColor(0xFFD7D9DE);
+        recordingLimit.setTextSize(13);
+        recordingLimit.setPadding(0, dp(4), 0, dp(4));
+        root.addView(recordingLimit);
+        addButton(root, "⏱  Cycle max recording duration", v -> cycleRecordingLimit());
         addButton(root, "●  Start recording", v -> startRecording());
         addButton(root, "■  Stop recording", v -> stopRecording());
         addButton(root, "▶  Play latest recording", v -> playFile(latestRecording));
@@ -296,6 +320,35 @@ public class MainActivity extends Activity {
 
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + 0.5f); }
 
+    private void cycleRecordingQuality() {
+        if (recorder != null) {
+            say("Stop recording before changing quality.");
+            return;
+        }
+        if (recordingBitrate == 64000) {
+            recordingBitrate = 128000;
+            recordingSampleRate = 44100;
+            recordingProfile.setText("Recording quality: Standard • AAC 128 kbps / 44.1 kHz");
+        } else if (recordingBitrate == 128000) {
+            recordingBitrate = 192000;
+            recordingSampleRate = 48000;
+            recordingProfile.setText("Recording quality: High • AAC 192 kbps / 48 kHz");
+        } else {
+            recordingBitrate = 64000;
+            recordingSampleRate = 22050;
+            recordingProfile.setText("Recording quality: Compact • AAC 64 kbps / 22.05 kHz");
+        }
+        say("Recording quality updated.");
+    }
+
+    private void cycleRecordingLimit() {
+        if (maxRecordingSeconds == 0) maxRecordingSeconds = 30;
+        else if (maxRecordingSeconds == 30) maxRecordingSeconds = 60;
+        else if (maxRecordingSeconds == 60) maxRecordingSeconds = 120;
+        else maxRecordingSeconds = 0;
+        recordingLimit.setText("Recording limit: " + (maxRecordingSeconds == 0 ? "Unlimited" : maxRecordingSeconds + " seconds"));
+    }
+
     private void startRecording() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
@@ -310,8 +363,8 @@ public class MainActivity extends Activity {
             recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
             recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
             recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-            recorder.setAudioEncodingBitRate(128000);
-            recorder.setAudioSamplingRate(44100);
+            recorder.setAudioEncodingBitRate(recordingBitrate);
+            recorder.setAudioSamplingRate(recordingSampleRate);
             recorder.setOutputFile(latestRecording.getAbsolutePath());
             if (liveWaveform != null) liveWaveform.clearLevels();
             sawMicSignal = false;
