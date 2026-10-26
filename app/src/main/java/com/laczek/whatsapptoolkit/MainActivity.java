@@ -131,6 +131,7 @@ public class MainActivity extends Activity {
         addButton(root, "■  Stop recording", v -> stopRecording());
         addButton(root, "▶  Play latest recording", v -> playFile(latestRecording));
         addButton(root, "⇧  Export / share recording", v -> exportLatest());
+        addButton(root, "WhatsApp  •  Send recording", v -> shareLatestToWhatsApp());
         addButton(root, "✕  Delete latest recording", v -> deleteLatestRecording());
 
         cardTitle(root, "02  •  YOUR AUDIO LIBRARY");
@@ -217,7 +218,9 @@ public class MainActivity extends Activity {
         root.addView(fields);
         addButton(root, "✂  Create trimmed M4A clip", v -> trimImported());
         addButton(root, "♫  Share imported audio", v -> shareImported());
+        addButton(root, "WhatsApp  •  Send song / audio", v -> shareImportedToWhatsApp());
         addButton(root, "⇧  Share trimmed clip", v -> shareTrimmed());
+        addButton(root, "WhatsApp  •  Send trimmed clip", v -> shareTrimmedToWhatsApp());
 
         cardTitle(root, "04  •  CALL AUDIO DIAGNOSTICS");
         TextView warning = new TextView(this);
@@ -654,6 +657,67 @@ public class MainActivity extends Activity {
     private void shareTrimmed() {
         if (latestTrim == null || !latestTrim.exists() || latestTrim.length() == 0) { say("Create a trimmed clip first."); return; }
         exportFile(latestTrim, "Share trimmed audio");
+    }
+
+    private void shareLatestToWhatsApp() {
+        if (latestRecording == null || !latestRecording.exists() || latestRecording.length() == 0) {
+            say("Record audio first."); return;
+        }
+        exportFileToWhatsApp(latestRecording);
+    }
+
+    private void shareTrimmedToWhatsApp() {
+        if (latestTrim == null || !latestTrim.exists() || latestTrim.length() == 0) {
+            say("Create a trimmed clip first."); return;
+        }
+        exportFileToWhatsApp(latestTrim);
+    }
+
+    private void shareImportedToWhatsApp() {
+        if (importedAudio == null) { say("Import a song or audio file first."); return; }
+        String mime = getContentResolver().getType(importedAudio);
+        shareUriToWhatsApp(importedAudio, mime == null ? "audio/*" : mime);
+    }
+
+    private void exportFileToWhatsApp(File file) {
+        Uri uri = null;
+        try {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Audio.Media.DISPLAY_NAME, file.getName());
+            values.put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp4");
+            values.put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_MUSIC + "/LaCzek Audio Lab");
+            uri = getContentResolver().insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) throw new IllegalStateException("Could not prepare audio for sharing");
+            try (FileInputStream in = new FileInputStream(file);
+                 OutputStream out = getContentResolver().openOutputStream(uri)) {
+                if (out == null) throw new IllegalStateException("Could not write shared audio");
+                byte[] buffer = new byte[8192];
+                int count;
+                while ((count = in.read(buffer)) > 0) out.write(buffer, 0, count);
+            }
+            shareUriToWhatsApp(uri, "audio/mp4");
+            status.setText("Audio prepared for WhatsApp sharing. WhatsApp decides how it is sent.");
+        } catch (Exception e) {
+            if (uri != null) {
+                try { getContentResolver().delete(uri, null, null); } catch (Exception ignored) {}
+            }
+            say("Could not prepare audio for WhatsApp: " + e.getMessage());
+        }
+    }
+
+    private void shareUriToWhatsApp(Uri uri, String mime) {
+        Intent share = new Intent(Intent.ACTION_SEND);
+        share.setType(mime);
+        share.putExtra(Intent.EXTRA_STREAM, uri);
+        share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            share.setPackage("com.whatsapp");
+            startActivity(share);
+        } catch (Exception whatsappUnavailable) {
+            share.setPackage(null);
+            try { startActivity(Intent.createChooser(share, "Send audio to WhatsApp or another app")); }
+            catch (Exception noApps) { say("No compatible sharing app found."); }
+        }
     }
 
     private void shareImported() {
