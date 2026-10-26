@@ -23,8 +23,11 @@ jobs:
 
       - name: Install Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: ''
+
+      - name: Install SDK platform and build tools
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Install Gradle
         run: |
@@ -32,37 +35,72 @@ jobs:
           unzip -q /tmp/gradle.zip -d /opt
           echo "/opt/gradle-8.9/bin" >> "$GITHUB_PATH"
 
-      - name: Accept SDK licenses and install platform
+      - name: Create CI-only signing key
+        id: signing
+        shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          set -euo pipefail
+          KEYSTORE="$RUNNER_TEMP/laczek-release.jks"
+          PASSWORD="$(openssl rand -hex 24)"
+          keytool -genkeypair -v \
+            -keystore "$KEYSTORE" \
+            -storepass "$PASSWORD" \
+            -keypass "$PASSWORD" \
+            -alias laczek-release \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=LaCzek Audio Lab, OU=Android, O=LaCzek, L=Kampala, ST=Central, C=UG"
+          {
+            echo "keystore=$KEYSTORE"
+            echo "password=$PASSWORD"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Run unit tests
         run: gradle --no-daemon testDebugUnitTest
 
-      - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+      - name: Build signed release APK
+        env:
+          RELEASE_STORE_FILE: ${{ steps.signing.outputs.keystore }}
+          RELEASE_STORE_PASSWORD: ${{ steps.signing.outputs.password }}
+          RELEASE_KEY_ALIAS: laczek-release
+          RELEASE_KEY_PASSWORD: ${{ steps.signing.outputs.password }}
+          APP_VERSION: 1.0.${{ github.run_number }}
+          APP_VERSION_CODE: ${{ github.run_number }}
+        run: gradle --no-daemon assembleRelease
 
-      - name: Verify APK exists
-        run: test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Verify APK package, contents, and signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          SIZE="$(stat -c '%s' "$APK")"
+          echo "APK size: $SIZE bytes"
+          test "$SIZE" -gt 15000
+          unzip -l "$APK"
+          unzip -l "$APK" | grep -q 'classes.dex'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
+          grep -q "package: name='com.laczek.whatsapptoolkit'" /tmp/badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          sha256sum "$APK" | tee /tmp/apk-sha256.txt
 
-      - name: Upload APK artifact
+      - name: Upload verified release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: laczek-audio-lab-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: laczek-audio-lab-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish downloadable GitHub Release
+      - name: Publish verified release APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: LaCzek Audio Lab v1.0.${{ github.run_number }}
           body: |
-            Automated Android debug build from commit ${{ github.sha }}.
+            Android release APK built from commit ${{ github.sha }}.
 
-            Includes microphone recording and audio import/share tools.
-            WhatsApp two-way call capture depends on Android/device restrictions and is not guaranteed.
-          files: app/build/outputs/apk/debug/app-debug.apk
+            CI ran unit tests and verified the APK package ID, DEX payload, and APK signature.
+            This build uses a temporary CI signing key for validation/distribution testing. It is not a stable signing identity for seamless future upgrades.
+            WhatsApp two-way call capture is not guaranteed because Android/WhatsApp may block remote caller audio.
+          files: app/build/outputs/apk/release/app-release.apk
           make_latest: true
