@@ -56,6 +56,11 @@ public class MainActivity extends Activity {
     private int recordingBitrate = 128000;
     private int recordingSampleRate = 44100;
     private int maxRecordingSeconds = 0;
+    private android.media.audiofx.Equalizer previewEqualizer;
+    private android.media.audiofx.BassBoost previewBassBoost;
+    private boolean bassBoostEnabled;
+    private int equalizerPreset;
+    private TextView effectsStatus;
     private TextView recordingProfile;
     private TextView recordingLimit;
     private LinearLayout libraryList;
@@ -218,6 +223,14 @@ public class MainActivity extends Activity {
                 userSeeking = false;
             }
         });
+        effectsStatus = new TextView(this);
+        effectsStatus.setText("PREVIEW EFFECTS  •  Equalizer: Normal  •  Bass boost: Off");
+        effectsStatus.setTextColor(0xFFD7D9DE);
+        effectsStatus.setTextSize(13);
+        effectsStatus.setPadding(0, dp(8), 0, dp(4));
+        root.addView(effectsStatus);
+        addButton(root, "🎛  Cycle preview equalizer", v -> cycleEqualizerPreset());
+        addButton(root, "🔊  Toggle preview bass boost", v -> toggleBassBoost());
         addButton(root, "Ⅱ / ▶  Pause or resume playback", v -> togglePlayback());
         addButton(root, "■  Stop playback", v -> stopPlayer());
 
@@ -561,8 +574,8 @@ public class MainActivity extends Activity {
             stopPlayer();
             player = new MediaPlayer();
             player.setDataSource(this, importedAudio);
-            player.setOnPreparedListener(mp -> { applyVolume(); mp.start(); updatePlaybackUi(); status.setText("Playing imported audio preview"); });
-            player.setOnCompletionListener(mp -> { mp.release(); if (player == mp) player = null; });
+            player.setOnPreparedListener(mp -> { applyVolume(); applyPreviewEffects(); mp.start(); updatePlaybackUi(); status.setText("Playing imported audio preview with selected preview effects"); });
+            player.setOnCompletionListener(mp -> { releasePreviewEffects(); mp.release(); if (player == mp) player = null; });
             player.setOnErrorListener((mp, what, extra) -> { status.setText("This audio format could not be previewed."); stopPlayer(); return true; });
             player.prepareAsync();
             status.setText("Preparing audio preview…");
@@ -575,7 +588,7 @@ public class MainActivity extends Activity {
             stopPlayer();
             player = new MediaPlayer();
             player.setDataSource(file.getAbsolutePath());
-            player.setOnPreparedListener(mp -> { applyVolume(); mp.start(); updatePlaybackUi(); status.setText("Playing " + file.getName()); });
+            player.setOnPreparedListener(mp -> { applyVolume(); applyPreviewEffects(); mp.start(); updatePlaybackUi(); status.setText("Playing " + file.getName() + " with selected preview effects"); });
             player.setOnCompletionListener(mp -> { mp.release(); if (player == mp) player = null; });
             player.setOnErrorListener((mp, what, extra) -> { status.setText("Audio playback failed."); stopPlayer(); return true; });
             player.prepareAsync();
@@ -601,6 +614,62 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void cycleEqualizerPreset() {
+        equalizerPreset = (equalizerPreset + 1) % 4;
+        if (effectsStatus != null) {
+            String[] labels = {"Normal", "Bass", "Vocal", "Treble"};
+            effectsStatus.setText("PREVIEW EFFECTS  •  Equalizer: " + labels[equalizerPreset] +
+                    "  •  Bass boost: " + (bassBoostEnabled ? "On" : "Off"));
+        }
+        applyPreviewEffects();
+    }
+
+    private void toggleBassBoost() {
+        bassBoostEnabled = !bassBoostEnabled;
+        if (effectsStatus != null) {
+            String[] labels = {"Normal", "Bass", "Vocal", "Treble"};
+            effectsStatus.setText("PREVIEW EFFECTS  •  Equalizer: " + labels[equalizerPreset] +
+                    "  •  Bass boost: " + (bassBoostEnabled ? "On" : "Off"));
+        }
+        applyPreviewEffects();
+    }
+
+    private void applyPreviewEffects() {
+        if (player == null) return;
+        try {
+            if (previewEqualizer == null) previewEqualizer = new android.media.audiofx.Equalizer(0, player.getAudioSessionId());
+            previewEqualizer.setEnabled(true);
+            short count = previewEqualizer.getNumberOfPresets();
+            if (count > 0) {
+                short target = (short) (equalizerPreset % count);
+                previewEqualizer.usePreset(target);
+            }
+        } catch (Exception e) {
+            if (effectsStatus != null) effectsStatus.setText("PREVIEW EFFECTS  •  Equalizer unsupported on this device");
+        }
+        try {
+            if (previewBassBoost == null) previewBassBoost = new android.media.audiofx.BassBoost(0, player.getAudioSessionId());
+            previewBassBoost.setStrength((short) (bassBoostEnabled ? 800 : 0));
+            previewBassBoost.setEnabled(bassBoostEnabled);
+        } catch (Exception e) {
+            if (effectsStatus != null && bassBoostEnabled)
+                effectsStatus.setText("PREVIEW EFFECTS  •  Bass boost unsupported on this device");
+        }
+    }
+
+    private void releasePreviewEffects() {
+        if (previewEqualizer != null) {
+            try { previewEqualizer.setEnabled(false); } catch (Exception ignored) {}
+            try { previewEqualizer.release(); } catch (Exception ignored) {}
+            previewEqualizer = null;
+        }
+        if (previewBassBoost != null) {
+            try { previewBassBoost.setEnabled(false); } catch (Exception ignored) {}
+            try { previewBassBoost.release(); } catch (Exception ignored) {}
+            previewBassBoost = null;
+        }
+    }
+
     private void applyVolume() {
         if (player != null) {
             try { player.setVolume(previewVolume, previewVolume); } catch (Exception ignored) {}
@@ -608,6 +677,7 @@ public class MainActivity extends Activity {
     }
 
     private void stopPlayer() {
+        releasePreviewEffects();
         if (player != null) {
             try { if (player.isPlaying()) player.stop(); } catch (Exception ignored) {}
             try { player.release(); } catch (Exception ignored) {}
