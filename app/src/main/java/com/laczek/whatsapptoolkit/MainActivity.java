@@ -45,6 +45,9 @@ public class MainActivity extends Activity {
     private TextView volumeLabel;
     private TextView playbackTime;
     private SeekBar playbackSeek;
+    private AudioLevelView liveWaveform;
+    private TextView levelStatus;
+    private boolean sawMicSignal;
     private LinearLayout libraryList;
     private boolean userSeeking;
     private EditText trimStart;
@@ -57,6 +60,19 @@ public class MainActivity extends Activity {
             if (recorder != null) {
                 long seconds = (System.currentTimeMillis() - recordingStarted) / 1000;
                 timer.setText(String.format(Locale.getDefault(), "%02d:%02d", seconds / 60, seconds % 60));
+                int amplitude = 0;
+                try { amplitude = recorder.getMaxAmplitude(); } catch (Exception ignored) {}
+                if (liveWaveform != null) liveWaveform.addLevel(amplitude);
+                if (amplitude > 700) sawMicSignal = true;
+                if (levelStatus != null) {
+                    if (amplitude > 700) {
+                        levelStatus.setText("MIC INPUT DETECTED  •  Peak " + amplitude);
+                        levelStatus.setTextColor(0xFF8FE3A1);
+                    } else {
+                        levelStatus.setText("Listening for microphone input… keep speaking");
+                        levelStatus.setTextColor(0xFFFFC078);
+                    }
+                }
                 handler.postDelayed(this, 500);
             }
         }
@@ -99,6 +115,18 @@ public class MainActivity extends Activity {
         timer.setGravity(Gravity.CENTER);
         timer.setPadding(0, dp(8), 0, dp(8));
         root.addView(timer);
+
+        liveWaveform = new AudioLevelView(this);
+        LinearLayout.LayoutParams waveLp = new LinearLayout.LayoutParams(-1, dp(76));
+        waveLp.bottomMargin = dp(8);
+        root.addView(liveWaveform, waveLp);
+        levelStatus = new TextView(this);
+        levelStatus.setText("LIVE MIC MONITOR  •  Start recording to test input");
+        levelStatus.setTextColor(0xFF9CA3AF);
+        levelStatus.setTextSize(12);
+        levelStatus.setPadding(dp(2), dp(4), dp(2), dp(10));
+        root.addView(levelStatus);
+
         addButton(root, "●  Start recording", v -> startRecording());
         addButton(root, "■  Stop recording", v -> stopRecording());
         addButton(root, "▶  Play latest recording", v -> playFile(latestRecording));
@@ -263,6 +291,12 @@ public class MainActivity extends Activity {
             recorder.setAudioEncodingBitRate(128000);
             recorder.setAudioSamplingRate(44100);
             recorder.setOutputFile(latestRecording.getAbsolutePath());
+            if (liveWaveform != null) liveWaveform.clearLevels();
+            sawMicSignal = false;
+            if (levelStatus != null) {
+                levelStatus.setText("Listening for microphone input…");
+                levelStatus.setTextColor(0xFFFFC078);
+            }
             recorder.prepare();
             recorder.start();
             recordingStarted = System.currentTimeMillis();
@@ -285,6 +319,15 @@ public class MainActivity extends Activity {
             status.setText(latestRecording != null && latestRecording.length() > 1024
                     ? "Saved locally • " + latestRecording.getName() + " • " + (latestRecording.length() / 1024) + " KB"
                     : "Recording stopped, but the file may be empty.");
+            if (levelStatus != null) {
+                if (sawMicSignal) {
+                    levelStatus.setText("MIC SIGNAL DETECTED  •  This confirms microphone input only, not the other caller.");
+                    levelStatus.setTextColor(0xFF8FE3A1);
+                } else {
+                    levelStatus.setText("LOW OR SILENT MIC INPUT DETECTED  •  Check permission and microphone access.");
+                    levelStatus.setTextColor(0xFFFF8A3D);
+                }
+            }
             refreshLibrary();
             say("Recording saved.");
         } catch (RuntimeException e) {
