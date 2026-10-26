@@ -47,6 +47,8 @@ public class MainActivity extends Activity {
     private SeekBar playbackSeek;
     private AudioLevelView liveWaveform;
     private TextView levelStatus;
+    private TextView audioDna;
+    private TextView deviceDiagnostics;
     private boolean sawMicSignal;
     private LinearLayout libraryList;
     private boolean userSeeking;
@@ -149,6 +151,7 @@ public class MainActivity extends Activity {
         cardTitle(root, "03  •  MUSIC STUDIO");
         addButton(root, "＋  Import audio", v -> pickAudio());
         addButton(root, "▶  Preview imported audio", v -> playImported());
+        addButton(root, "📊  Analyze selected audio", v -> analyzeImportedAudio());
         volumeLabel = new TextView(this);
         volumeLabel.setText("Preview volume: 100%");
         volumeLabel.setTextColor(0xFFD7D9DE);
@@ -222,6 +225,14 @@ public class MainActivity extends Activity {
         addButton(root, "⇧  Share trimmed clip", v -> shareTrimmed());
         addButton(root, "WhatsApp  •  Send trimmed clip", v -> shareTrimmedToWhatsApp());
 
+        audioDna = new TextView(this);
+        audioDna.setText("AUDIO DNA  •  Import a track to inspect its metadata.");
+        audioDna.setTextColor(0xFFD7D9DE);
+        audioDna.setTextSize(13);
+        audioDna.setPadding(dp(14), dp(12), dp(14), dp(12));
+        audioDna.setBackgroundColor(0xFF15171B);
+        root.addView(audioDna);
+
         cardTitle(root, "04  •  CALL AUDIO DIAGNOSTICS");
         TextView warning = new TextView(this);
         warning.setText("This recorder uses the microphone. Android and WhatsApp may block remote call audio, so the other caller may not be recorded. This app does not bypass those protections. Test locally before relying on any recording, and get everyone’s consent.");
@@ -230,6 +241,14 @@ public class MainActivity extends Activity {
         warning.setPadding(dp(14), dp(14), dp(14), dp(14));
         warning.setBackgroundColor(0xFF211711);
         root.addView(warning);
+        addButton(root, "⌁  Run device compatibility check", v -> runCompatibilityCheck());
+        deviceDiagnostics = new TextView(this);
+        deviceDiagnostics.setText("DEVICE COMPATIBILITY LAB  •  Run a check to inspect available capabilities.");
+        deviceDiagnostics.setTextColor(0xFFD7D9DE);
+        deviceDiagnostics.setTextSize(13);
+        deviceDiagnostics.setPadding(dp(14), dp(12), dp(14), dp(12));
+        deviceDiagnostics.setBackgroundColor(0xFF15171B);
+        root.addView(deviceDiagnostics);
 
         status = new TextView(this);
         status.setText("Ready • no audio is uploaded automatically");
@@ -572,8 +591,81 @@ public class MainActivity extends Activity {
             try { getContentResolver().takePersistableUriPermission(importedAudio, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
             String name = importedAudio.getLastPathSegment();
             status.setText("Imported audio selected • " + (name == null ? "audio file" : name));
+            analyzeImportedAudio();
             say("Audio selected.");
         }
+    }
+
+    private void analyzeImportedAudio() {
+        if (importedAudio == null) {
+            say("Import an audio file first.");
+            return;
+        }
+        android.media.MediaMetadataRetriever retriever = new android.media.MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(this, importedAudio);
+            String duration = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION);
+            String bitrate = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE);
+            String mime = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE);
+            String width = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
+            String sampleRate = "Not exposed by Android metadata";
+            String channels = "Not exposed by Android metadata";
+            long durationMs = duration == null ? -1 : Long.parseLong(duration);
+            long size = -1;
+            try (android.content.res.AssetFileDescriptor afd = getContentResolver().openAssetFileDescriptor(importedAudio, "r")) {
+                if (afd != null) size = afd.getLength();
+            } catch (Exception ignored) {}
+            StringBuilder report = new StringBuilder("AUDIO DNA\n");
+            report.append("Type: ").append(mime == null ? getContentResolver().getType(importedAudio) : mime).append("\n");
+            report.append("Duration: ").append(durationMs < 0 ? "Unknown" : formatTime((int) durationMs)).append("\n");
+            report.append("Bitrate: ").append(bitrate == null ? "Unknown" : (Long.parseLong(bitrate) / 1000) + " kbps").append("\n");
+            report.append("File size: ").append(size < 0 ? "Unknown" : formatBytes(size)).append("\n");
+            report.append("Sample rate/channels: ").append(sampleRate).append(" / ").append(channels);
+            audioDna.setText(report.toString());
+            status.setText("Audio metadata analyzed locally. No audio uploaded.");
+        } catch (Exception e) {
+            audioDna.setText("AUDIO DNA\nAndroid could not read complete metadata for this format. Preview or share may still work.");
+            status.setText("Audio metadata unavailable for this file.");
+        } finally {
+            try { retriever.release(); } catch (Exception ignored) {}
+        }
+    }
+
+    private String formatBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024L * 1024) return String.format(Locale.getDefault(), "%.1f KB", bytes / 1024f);
+        return String.format(Locale.getDefault(), "%.1f MB", bytes / (1024f * 1024f));
+    }
+
+    private void runCompatibilityCheck() {
+        StringBuilder report = new StringBuilder("DEVICE COMPATIBILITY LAB\n");
+        report.append("Android: ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append(")\n");
+        report.append("Microphone permission: ").append(checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED ? "Granted" : "Not granted").append("\n");
+        report.append("AAC encoder: ");
+        boolean aac = false;
+        try {
+            android.media.MediaCodecList codecs = new android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS);
+            for (android.media.MediaCodecInfo codec : codecs.getCodecInfos()) {
+                if (codec.isEncoder()) {
+                    for (String type : codec.getSupportedTypes()) {
+                        if ("audio/mp4a-latm".equalsIgnoreCase(type)) { aac = true; break; }
+                    }
+                }
+                if (aac) break;
+            }
+        } catch (Exception ignored) {}
+        report.append(aac ? "Available" : "Not detected").append("\n");
+        report.append("Free app storage: ");
+        try {
+            File base = getExternalFilesDir(Environment.DIRECTORY_MUSIC);
+            long free = base == null ? getFilesDir().getFreeSpace() : base.getFreeSpace();
+            report.append(formatBytes(free));
+        } catch (Exception e) { report.append("Unavailable"); }
+        report.append("\nCall audio capture: Restricted by Android/WhatsApp; this check cannot confirm remote-party capture.");
+        report.append("\nPlayback capture: Requires user-approved MediaProjection and supported playback; private call audio may remain inaccessible.");
+        report.append("\nSpeakerphone fallback: Not verified on this device. Make a consented test recording and listen to both channels.");
+        if (deviceDiagnostics != null) deviceDiagnostics.setText(report.toString());
+        status.setText("Compatibility report generated. This checks capabilities, not actual call capture.");
     }
 
     private void trimImported() {
