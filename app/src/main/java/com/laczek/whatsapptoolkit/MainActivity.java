@@ -608,8 +608,24 @@ public class MainActivity extends Activity {
             String bitrate = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE);
             String mime = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE);
             String width = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
-            String sampleRate = "Not exposed by Android metadata";
-            String channels = "Not exposed by Android metadata";
+            String sampleRate = "Unknown";
+            String channels = "Unknown";
+            try {
+                android.media.MediaExtractor ex = new android.media.MediaExtractor();
+                ex.setDataSource(this, importedAudio, null);
+                for (int i = 0; i < ex.getTrackCount(); i++) {
+                    android.media.MediaFormat track = ex.getTrackFormat(i);
+                    String trackMime = track.getString(android.media.MediaFormat.KEY_MIME);
+                    if (trackMime != null && trackMime.startsWith("audio/")) {
+                        if (track.containsKey(android.media.MediaFormat.KEY_SAMPLE_RATE))
+                            sampleRate = track.getInteger(android.media.MediaFormat.KEY_SAMPLE_RATE) + " Hz";
+                        if (track.containsKey(android.media.MediaFormat.KEY_CHANNEL_COUNT))
+                            channels = String.valueOf(track.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT));
+                        break;
+                    }
+                }
+                ex.release();
+            } catch (Exception ignored) {}
             long durationMs = duration == null ? -1 : Long.parseLong(duration);
             long size = -1;
             try (android.content.res.AssetFileDescriptor afd = getContentResolver().openAssetFileDescriptor(importedAudio, "r")) {
