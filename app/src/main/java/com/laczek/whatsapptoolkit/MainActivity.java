@@ -354,7 +354,7 @@ public class MainActivity extends Activity {
             startSec = Integer.parseInt(trimStart.getText().toString().trim());
             endSec = Integer.parseInt(trimEnd.getText().toString().trim());
         } catch (Exception e) { say("Enter start and end times in seconds."); return; }
-        if (startSec < 0 || endSec <= startSec) { say("End time must be greater than start time."); return; }
+        if (!AudioTrimRange.isValid(startSec, endSec)) { say("End time must be greater than start time."); return; }
         MediaExtractor extractor = new MediaExtractor();
         MediaMuxer muxer = null;
         boolean muxerStarted = false;
@@ -376,8 +376,8 @@ public class MainActivity extends Activity {
             if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("Cannot create edit folder.");
             latestTrim = new File(dir, "LaCzek-Clip-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date()) + ".m4a");
             extractor.selectTrack(audioTrack);
-            long startUs = startSec * 1000000L;
-            long endUs = endSec * 1000000L;
+            long startUs = AudioTrimRange.startMicros(startSec);
+            long endUs = AudioTrimRange.endMicros(endSec);
             extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC);
             muxer = new MediaMuxer(latestTrim.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
             int outputTrack = muxer.addTrack(inputFormat);
