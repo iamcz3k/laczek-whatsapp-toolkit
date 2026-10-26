@@ -106,6 +106,25 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           sha256sum "$APK" | tee /tmp/apk-sha256.txt
 
+      - name: Install and launch APK in Android emulator
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          script: |
+            set -euo pipefail
+            APK="app/build/outputs/apk/release/app-release.apk"
+            adb install -r "$APK"
+            adb shell monkey -p com.laczek.whatsapptoolkit 1
+            sleep 5
+            if adb logcat -d -s AndroidRuntime:E | grep -F "Process: com.laczek.whatsapptoolkit"; then
+              echo "App crashed during emulator launch."
+              exit 1
+            fi
+            echo "APK installed and launcher activity started successfully."
+
       - name: Upload verified release APK artifact
         uses: actions/upload-artifact@v4
         with:
