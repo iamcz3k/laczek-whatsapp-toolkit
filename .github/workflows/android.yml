@@ -23,6 +23,8 @@ jobs:
 
       - name: Install Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
 
       - name: Install SDK platform and build tools
         run: |
