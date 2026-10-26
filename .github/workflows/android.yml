@@ -90,7 +90,7 @@ jobs:
           APP_VERSION_CODE: ${{ github.run_number }}
         run: gradle --no-daemon assembleRelease
 
-      - name: Verify APK package, contents, and signature
+      - name: Verify APK package, compiled app payload, and signature
         shell: bash
         run: |
           set -euo pipefail
@@ -98,9 +98,21 @@ jobs:
           test -s "$APK"
           SIZE="$(stat -c '%s' "$APK")"
           echo "APK size: $SIZE bytes"
-          test "$SIZE" -gt 15000
+          # This app uses Android's built-in APIs and has no bundled third-party runtime.
+          # These are guardrails against an empty or placeholder APK, not a target size.
+          test "$SIZE" -gt 25000
           unzip -l "$APK"
-          unzip -l "$APK" | grep -q 'classes.dex'
+          unzip -p "$APK" classes.dex > /tmp/classes.dex
+          DEX_SIZE="$(stat -c '%s' /tmp/classes.dex)"
+          echo "Compiled DEX size: $DEX_SIZE bytes"
+          test "$DEX_SIZE" -gt 50000
+          strings /tmp/classes.dex > /tmp/dex-strings.txt
+          for symbol in 'com/laczek/whatsapptoolkit/MainActivity' 'startRecording' 'stopRecording' 'trimImported' 'runCompatibilityCheck' 'cycleEqualizerPreset' 'toggleBassBoost'; do
+            if ! grep -Fq "$symbol" /tmp/dex-strings.txt; then
+              echo "Missing expected compiled app symbol: $symbol" >&2
+              exit 1
+            fi
+          done
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
           grep -q "package: name='com.laczek.whatsapptoolkit'" /tmp/badging.txt
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
@@ -131,7 +143,8 @@ jobs:
           body: |
             Android release APK built from commit ${{ github.sha }}.
 
-            CI ran unit tests and verified the APK package ID, DEX payload, and APK signature.
+            CI ran unit tests and verified expected compiled app symbols, package ID, DEX payload, APK signature, and launchable activity metadata.
+            The app uses Android's built-in APIs and intentionally bundles no large third-party runtime; APK size alone is not a quality metric.
             Signing mode: ${{ steps.signing.outputs.stable == 'true' && 'persistent configured signing key' || 'temporary CI signing key' }}. A temporary key means future updates may require uninstalling the previous version first.
             WhatsApp two-way call capture is not guaranteed because Android/WhatsApp may block remote caller audio.
           files: app/build/outputs/apk/release/app-release.apk
