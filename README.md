@@ -4,14 +4,17 @@ A local-first Android audio utility for recording, previewing, trimming and shar
 
 ## Features
 - Microphone recording to AAC/M4A with runtime permission handling and elapsed timer.
-- Local playback of the latest recording.
+- Local playback of the latest recording and a local recording library.
+- Playback seek bar, elapsed/total time display, pause/resume, stop, and adjustable preview volume.
+- Browse recent recordings, play/share individual recordings, and delete unwanted local files.
 - Export recordings to the Music/LaCzek Audio Lab folder and share them with other apps.
 - Import audio using Android's document picker.
 - Preview imported audio with adjustable playback volume.
 - Trim AAC/M4A audio by start/end seconds into a new M4A clip, without re-encoding.
 - Share imported audio or the resulting clip through Android's share sheet.
 - AMOLED dark interface with orange accents.
-- GitHub Actions build, APK artifact, and automated GitHub Release.
+- Branded launcher icon and app name.
+- GitHub Actions unit tests, release APK packaging/signature checks, emulator install-and-launch smoke test, APK artifact, and automated GitHub Release.
 
 ## Important limitations
 - **WhatsApp call audio:** Android and WhatsApp may restrict capture of remote call audio. This app records from the microphone and does not bypass Android security or another app's privacy controls. Depending on the device, Android version, audio routing and app version, recordings may contain only microphone audio or may be silent. Test before relying on a recording and obtain consent from everyone involved.
@@ -20,6 +23,6 @@ A local-first Android audio utility for recording, previewing, trimming and shar
 - **Device testing:** CI verifies compilation and APK packaging. Real microphone, playback, document-provider and WhatsApp behavior still needs testing on a physical Android device.
 
 ## Download and build
-See [GitHub Releases](https://github.com/iamcz3k/laczek-whatsapp-toolkit/releases) for the latest APK. Pushes to `main` trigger a build and release.
+See [GitHub Releases](https://github.com/iamcz3k/laczek-whatsapp-toolkit/releases) for the latest APK. Pushes to `main` trigger a build, emulator smoke test, artifact upload, and release. For seamless upgrades, configure the repository Actions secrets `RELEASE_KEYSTORE_BASE64`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, and `RELEASE_KEY_PASSWORD` with one persistent signing key. Without those secrets, CI generates a temporary key for each run; that APK is installable but may not update an earlier installation.
 
 Package: `com.laczek.whatsapptoolkit`
