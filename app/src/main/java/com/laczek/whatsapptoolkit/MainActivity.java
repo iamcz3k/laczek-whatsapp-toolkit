@@ -43,6 +43,10 @@ public class MainActivity extends Activity {
     private TextView status;
     private TextView timer;
     private TextView volumeLabel;
+    private TextView playbackTime;
+    private SeekBar playbackSeek;
+    private LinearLayout libraryList;
+    private boolean userSeeking;
     private EditText trimStart;
     private EditText trimEnd;
     private long recordingStarted;
@@ -99,8 +103,21 @@ public class MainActivity extends Activity {
         addButton(root, "■  Stop recording", v -> stopRecording());
         addButton(root, "▶  Play latest recording", v -> playFile(latestRecording));
         addButton(root, "⇧  Export / share recording", v -> exportLatest());
+        addButton(root, "✕  Delete latest recording", v -> deleteLatestRecording());
 
-        cardTitle(root, "02  •  MUSIC STUDIO");
+        cardTitle(root, "02  •  YOUR AUDIO LIBRARY");
+        TextView libraryHelp = new TextView(this);
+        libraryHelp.setText("Recordings saved by this app stay on your phone. Select any item to play or share it.");
+        libraryHelp.setTextColor(0xFFB7BBC4);
+        libraryHelp.setTextSize(13);
+        libraryHelp.setPadding(0, 0, 0, dp(8));
+        root.addView(libraryHelp);
+        libraryList = new LinearLayout(this);
+        libraryList.setOrientation(LinearLayout.VERTICAL);
+        root.addView(libraryList);
+        refreshLibrary();
+
+        cardTitle(root, "03  •  MUSIC STUDIO");
         addButton(root, "＋  Import audio", v -> pickAudio());
         addButton(root, "▶  Preview imported audio", v -> playImported());
         volumeLabel = new TextView(this);
@@ -114,6 +131,36 @@ public class MainActivity extends Activity {
         volume.setProgressTintList(android.content.res.ColorStateList.valueOf(0xFFFF8A3D));
         volume.setThumbTintList(android.content.res.ColorStateList.valueOf(0xFFFF8A3D));
         root.addView(volume);
+        playbackTime = new TextView(this);
+        playbackTime.setText("00:00 / 00:00");
+        playbackTime.setTextColor(0xFFD7D9DE);
+        playbackTime.setTextSize(12);
+        playbackTime.setPadding(0, dp(8), 0, dp(2));
+        root.addView(playbackTime);
+        playbackSeek = new SeekBar(this);
+        playbackSeek.setMax(1000);
+        playbackSeek.setProgressTintList(android.content.res.ColorStateList.valueOf(0xFFFF8A3D));
+        playbackSeek.setThumbTintList(android.content.res.ColorStateList.valueOf(0xFFFF8A3D));
+        root.addView(playbackSeek);
+        playbackSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                if (fromUser && player != null) {
+                    userSeeking = true;
+                    int duration = safeDuration();
+                    playbackTime.setText(formatTime((int) (duration * progress / 1000f)) + " / " + formatTime(duration));
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) { userSeeking = true; }
+            @Override public void onStopTrackingTouch(SeekBar bar) {
+                if (player != null) {
+                    try { player.seekTo((int) (safeDuration() * bar.getProgress() / 1000f)); } catch (Exception ignored) {}
+                }
+                userSeeking = false;
+            }
+        });
+        addButton(root, "Ⅱ / ▶  Pause or resume playback", v -> togglePlayback());
+        addButton(root, "■  Stop playback", v -> stopPlayer());
+
         volume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 previewVolume = progress / 100f;
@@ -144,7 +191,7 @@ public class MainActivity extends Activity {
         addButton(root, "♫  Share imported audio", v -> shareImported());
         addButton(root, "⇧  Share trimmed clip", v -> shareTrimmed());
 
-        cardTitle(root, "03  •  CALL AUDIO DIAGNOSTICS");
+        cardTitle(root, "04  •  CALL AUDIO DIAGNOSTICS");
         TextView warning = new TextView(this);
         warning.setText("This recorder uses the microphone. Android and WhatsApp may block remote call audio, so the other caller may not be recorded. This app does not bypass those protections. Test locally before relying on any recording, and get everyone’s consent.");
         warning.setTextColor(0xFFE2C7B7);
@@ -238,6 +285,7 @@ public class MainActivity extends Activity {
             status.setText(latestRecording != null && latestRecording.length() > 1024
                     ? "Saved locally • " + latestRecording.getName() + " • " + (latestRecording.length() / 1024) + " KB"
                     : "Recording stopped, but the file may be empty.");
+            refreshLibrary();
             say("Recording saved.");
         } catch (RuntimeException e) {
             if (latestRecording != null) latestRecording.delete();
@@ -261,13 +309,127 @@ public class MainActivity extends Activity {
 
     private void playLatest() { playFile(latestRecording); }
 
+    private int safeDuration() {
+        try { return player == null ? 0 : player.getDuration(); }
+        catch (Exception ignored) { return 0; }
+    }
+
+    private String formatTime(int milliseconds) {
+        int seconds = Math.max(0, milliseconds / 1000);
+        return String.format(Locale.getDefault(), "%02d:%02d", seconds / 60, seconds % 60);
+    }
+
+    private void togglePlayback() {
+        if (player == null) {
+            if (importedAudio != null) playImported();
+            else playFile(latestRecording);
+            return;
+        }
+        try {
+            if (player.isPlaying()) {
+                player.pause();
+                status.setText("Playback paused");
+            } else {
+                player.start();
+                status.setText("Playback resumed");
+            }
+        } catch (Exception e) { say("Playback control failed."); }
+    }
+
+    private void refreshLibrary() {
+        if (libraryList == null) return;
+        libraryList.removeAllViews();
+        File dir = new File(getExternalFilesDir(Environment.DIRECTORY_MUSIC), "Recordings");
+        File[] files = dir.listFiles((folder, name) -> name.toLowerCase(Locale.ROOT).endsWith(".m4a"));
+        if (files == null || files.length == 0) {
+            TextView empty = new TextView(this);
+            empty.setText("No recordings yet. Record something and it will appear here.");
+            empty.setTextColor(0xFF8A8F98);
+            empty.setTextSize(13);
+            empty.setPadding(0, dp(8), 0, dp(12));
+            libraryList.addView(empty);
+            return;
+        }
+        java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        int count = Math.min(files.length, 30);
+        for (int i = 0; i < count; i++) {
+            File file = files[i];
+            LinearLayout item = new LinearLayout(this);
+            item.setOrientation(LinearLayout.VERTICAL);
+            item.setPadding(dp(12), dp(10), dp(12), dp(10));
+            item.setBackgroundColor(0xFF15171B);
+            LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(-1, -2);
+            itemLp.bottomMargin = dp(6);
+            libraryList.addView(item, itemLp);
+            TextView name = new TextView(this);
+            name.setText(file.getName());
+            name.setTextColor(0xFFFFFFFF);
+            name.setTextSize(14);
+            name.setTypeface(null, 1);
+            item.addView(name);
+            TextView meta = new TextView(this);
+            meta.setText((file.length() / 1024) + " KB  •  " + new SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(new Date(file.lastModified())));
+            meta.setTextColor(0xFF9CA3AF);
+            meta.setTextSize(12);
+            item.addView(meta);
+            LinearLayout actions = new LinearLayout(this);
+            actions.setOrientation(LinearLayout.HORIZONTAL);
+            item.addView(actions);
+            Button play = smallButton("Play");
+            play.setOnClickListener(v -> { latestRecording = file; playFile(file); });
+            actions.addView(play, new LinearLayout.LayoutParams(0, dp(42), 1));
+            Button share = smallButton("Share");
+            share.setOnClickListener(v -> { latestRecording = file; exportLatest(); });
+            LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(0, dp(42), 1);
+            actionLp.leftMargin = dp(6);
+            actions.addView(share, actionLp);
+            Button delete = smallButton("Delete");
+            delete.setOnClickListener(v -> {
+                if (player != null && file.equals(latestRecording)) stopPlayer();
+                if (file.delete()) {
+                    if (file.equals(latestRecording)) latestRecording = null;
+                    refreshLibrary();
+                    status.setText("Deleted " + file.getName());
+                } else say("Could not delete this recording.");
+            });
+            LinearLayout.LayoutParams deleteLp = new LinearLayout.LayoutParams(0, dp(42), 1);
+            deleteLp.leftMargin = dp(6);
+            actions.addView(delete, deleteLp);
+        }
+    }
+
+    private Button smallButton(String label) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setTextSize(12);
+        b.setTextColor(0xFFFFFFFF);
+        b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xFF30343B));
+        return b;
+    }
+
+    private void deleteLatestRecording() {
+        if (latestRecording == null || !latestRecording.exists()) {
+            say("No latest recording to delete.");
+            return;
+        }
+        File target = latestRecording;
+        if (player != null) stopPlayer();
+        if (target.delete()) {
+            latestRecording = null;
+            status.setText("Recording deleted");
+            refreshLibrary();
+            say("Recording deleted.");
+        } else say("Could not delete recording.");
+    }
+
     private void playImported() {
         if (importedAudio == null) { say("Import an audio file first."); return; }
         try {
             stopPlayer();
             player = new MediaPlayer();
             player.setDataSource(this, importedAudio);
-            player.setOnPreparedListener(mp -> { applyVolume(); mp.start(); status.setText("Playing imported audio preview"); });
+            player.setOnPreparedListener(mp -> { applyVolume(); mp.start(); updatePlaybackUi(); status.setText("Playing imported audio preview"); });
             player.setOnCompletionListener(mp -> { mp.release(); if (player == mp) player = null; });
             player.setOnErrorListener((mp, what, extra) -> { status.setText("This audio format could not be previewed."); stopPlayer(); return true; });
             player.prepareAsync();
@@ -281,11 +443,30 @@ public class MainActivity extends Activity {
             stopPlayer();
             player = new MediaPlayer();
             player.setDataSource(file.getAbsolutePath());
-            player.setOnPreparedListener(mp -> { applyVolume(); mp.start(); status.setText("Playing " + file.getName()); });
+            player.setOnPreparedListener(mp -> { applyVolume(); mp.start(); updatePlaybackUi(); status.setText("Playing " + file.getName()); });
             player.setOnCompletionListener(mp -> { mp.release(); if (player == mp) player = null; });
             player.setOnErrorListener((mp, what, extra) -> { status.setText("Audio playback failed."); stopPlayer(); return true; });
             player.prepareAsync();
         } catch (Exception e) { stopPlayer(); say("Could not play audio."); }
+    }
+
+    private void updatePlaybackUi() {
+        handler.post(new Runnable() {
+            @Override public void run() {
+                if (player == null) {
+                    if (playbackSeek != null) playbackSeek.setProgress(0);
+                    if (playbackTime != null) playbackTime.setText("00:00 / 00:00");
+                    return;
+                }
+                try {
+                    int duration = player.getDuration();
+                    int position = player.getCurrentPosition();
+                    if (!userSeeking && playbackSeek != null && duration > 0) playbackSeek.setProgress((int) (position * 1000L / duration));
+                    if (playbackTime != null) playbackTime.setText(formatTime(position) + " / " + formatTime(duration));
+                    if (player.isPlaying()) handler.postDelayed(this, 250);
+                } catch (Exception ignored) {}
+            }
+        });
     }
 
     private void applyVolume() {
@@ -299,6 +480,8 @@ public class MainActivity extends Activity {
             try { if (player.isPlaying()) player.stop(); } catch (Exception ignored) {}
             try { player.release(); } catch (Exception ignored) {}
             player = null;
+            if (playbackSeek != null) playbackSeek.setProgress(0);
+            if (playbackTime != null) playbackTime.setText("00:00 / 00:00");
         }
     }
 
